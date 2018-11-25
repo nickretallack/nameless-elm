@@ -1,15 +1,22 @@
 import Browser
+import Browser.Navigation as Nav
+import Url exposing (Url)
 import Html exposing (..)
 import Dict exposing (Dict)
+import Random exposing (Seed, initialSeed, step)
+import Uuid
 
 -- main
 
+main : Program () Model Msg
 main =
-  Browser.element
+  Browser.application
     { init = init
     , view = view
     , update = update
     , subscriptions = subscriptions
+    , onUrlRequest = ClickedLink
+    , onUrlChange = ChangedUrl
     }
 
 -- model
@@ -63,8 +70,8 @@ type alias Connection =
 
 exampleID = "example"
 
-init : () -> (Model, Cmd Msg)
-init _ = 
+init : () -> Url -> Nav.Key -> (Model, Cmd Msg)
+init _ url key = 
   (
     { documentation=
       { names= Dict.fromList [(exampleID, makeTranslatable "Example")]
@@ -77,7 +84,9 @@ init _ =
 
 -- update
 
-type Msg = Nothing
+type Msg
+  = ChangedUrl Url
+  | ClickedLink Browser.UrlRequest
 
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model = (model, Cmd.none)
@@ -88,27 +97,12 @@ subscriptions model =
 
 --view
 
-view : Model -> Html Msg
+view : Model -> Browser.Document Msg
 view model =
-  div [] [text "hello"]
-
--- type alias 
-
-
-
--- type alias FunctionDocumentation = 
-
--- type Documentation =
--- 	FunctionDocumentation 
-
-
-
--- names[definition_id] = translatedString
--- nib_names[nib_id] = translatedString
--- descriptions[definition_id] = translatedString
--- implementations[definition_id] = 
--- displays[definition_id]
-
-
--- model
-
+  { title = "Nameless Programming Language"
+  , body = 
+    [ div [] 
+      [ button [] [text "New Constant"]    
+      ]
+    ]
+  }
