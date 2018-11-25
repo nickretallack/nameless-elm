@@ -3,11 +3,12 @@ import Browser.Navigation as Nav
 import Url exposing (Url)
 import Html exposing (..)
 import Html.Attributes exposing (..)
-import Html.Events exposing (onClick, onInput)
+import Html.Events exposing (onClick, onInput, on, targetValue)
 import Dict exposing (Dict)
-import Random exposing (Seed, initialSeed, step)
+import Random
 import UUID exposing (UUID)
 import Debug exposing (log)
+import Json.Decode as Json
 
 -- main
 
@@ -52,16 +53,17 @@ type alias NodeID = String
 
 type Value
   = Integer Int
-  | Float Float
-  | String String
+  | Number Float
+  | Text String
 
-typeNames = 
-  [ "Integer"
-  , "Floating Point Number"
-  ]
+valueToTypeString value =
+  case value of
+    Integer _ -> "integer"
+    Number _ -> "number"
+    Text _ -> "text"
 
 type Implementation
-  = ConstantImplementation String Value
+  = ConstantImplementation Value
   | ExternalImplementation String
   | GraphImplementation
     { connections: Dict NibConnection NibConnection
@@ -82,24 +84,25 @@ type alias Connection =
 
 --- init
 
-exampleID = "example"
-
 type alias Model =
   { names: Dict DefinitionID TranslatableString
   , descriptions: Dict DefinitionID TranslatableString
   , nibs: Dict NibID TranslatableString
-  , implementation: Dict DefinitionID Implementation
+  , implementations: Dict DefinitionID Implementation
   , navKey: Nav.Key
   , currentDefinitionID: Maybe DefinitionID
   }
 
+exampleID = "695eec7b-3084-40e3-994b-59028c466d1d"
 init : () -> Url -> Nav.Key -> (Model, Cmd Msg)
 init _ url key = 
   (
     { names= Dict.fromList [(exampleID, makeTranslatable "Example")]
     , descriptions= Dict.fromList [(exampleID, makeTranslatable "Description of example")]
     , nibs= Dict.fromList []
-    , implementation=Dict.fromList [(exampleID, ConstantImplementation "Gravity" (Float 9.8))]
+    , implementations=Dict.fromList
+      [ (exampleID, ConstantImplementation (Number 9.8))
+      ] 
     , navKey = key
     , currentDefinitionID = definitionIDFromUrl url
     }
@@ -112,19 +115,21 @@ type Msg
   | ClickedLink Browser.UrlRequest
   | NewConstant
   | ChangeName DefinitionID String
+  | ChangeConstantType DefinitionID String
 
 initialSeed = Random.initialSeed 12345
 
-isUuid maybeString =
-  case maybeString of
-    Nothing -> False
-    Just string ->
-      case UUID.fromString string of
-        Ok _ -> True
-        Err _ -> False
+isUuid string =
+  case UUID.fromString string of
+    Ok _ -> True
+    Err _ -> False
 
+definitionIDFromUrl : Url -> Maybe DefinitionID
 definitionIDFromUrl url =
-  if (isUuid url.fragment) then Just url.path else Nothing
+  case url.fragment of
+    Nothing -> Nothing
+    Just fragment ->
+      if (isUuid fragment) then Just fragment else Nothing
 
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model = 
@@ -137,35 +142,43 @@ update msg model =
       (model, Cmd.none)
     NewConstant ->
       let (uuid, newSeed) = makeUuid initialSeed in
-      ( editNames model (\names ->
-          Dict.insert uuid (makeTranslatable "") names)
+      ( { model
+        | names =
+          Dict.insert uuid (makeTranslatable "") model.names
+        , implementations =
+          Dict.insert uuid (ConstantImplementation (Text "")) model.implementations
+        }
       , Nav.pushUrl model.navKey ("#" ++ uuid))
     ChangeName uuid newName ->
-      ( editNames model (\names -> 
+      ( { model
+        | names =
           Dict.update uuid (\maybeName ->
             case maybeName of
               Nothing ->
                 Just (makeTranslatable newName)
               Just name ->
                 Just (updateTranslatable name newName)
-          ) names
-        )
+          ) model.names
+        }
       , Cmd.none
       )
-
--- addConstant : Model -> UUID -> Model
--- addConstant model uuid =
---   { model |
---     names = 
---   }
+    ChangeConstantType uuid newType ->
+      ( model
+      , Cmd.none
+      )
 
 makeUuid seed = 
   let (uuid, newSeed) = Random.step UUID.generator seed in (UUID.canonical uuid, newSeed)
 
-editNames model edit =
-  {
-    model | names = edit model.names
-  }
+-- editImplementations model edit =
+--   { model | implementations = }
+
+-- editNames model edit =
+--   { model | names = edit model.name }
+
+-- addName model uuid =
+--   ( editNames model (\names ->
+--       Dict.insert uuid (makeTranslatable "") names))
 
 subscriptions : Model -> Sub Msg
 subscriptions model =
@@ -185,7 +198,11 @@ nameView model definitionID =
     [ onInput (\text -> ChangeName definitionID text)
     , value (getName model definitionID)
     ] []
-  
+
+onChange : (String -> msg) -> Attribute msg
+onChange tagger =
+  on "input" (Json.map tagger targetValue)
+
 view : Model -> Browser.Document Msg
 view model =
   { title = "Nameless Programming Language"
@@ -197,11 +214,36 @@ view model =
             div [] [text "Not editing a constant"]
           
           Just definitionID ->
-            div []
-            [ text "Editing a constant: "
-            , nameView model definitionID
-
-            ]
+            case Dict.get (log "current definition" definitionID) model.implementations of
+              Nothing ->
+                div [] [text "404"]
+              Just implementation ->
+                case implementation of
+                  ConstantImplementation constantValue ->
+                    let typeName = valueToTypeString constantValue in
+                    div []
+                    [ text "Editing a constant: "
+                    , nameView model definitionID
+                    , select [onChange (\type_ -> ChangeConstantType definitionID type_)] 
+                      [ viewOption typeName "integer" "Integer"
+                      , viewOption typeName "number" "Number"
+                      , viewOption typeName "text" "Text"
+                      ]
+                    , case constantValue of
+                        Text string ->
+                          textarea [] [text string]
+                        Number number ->
+                          input [type_ "number", step "any", value (String.fromFloat number)] []
+                        Integer integer ->
+                          input [type_ "number", value (String.fromInt integer)] []
+                    ]
+                  ExternalImplementation _ ->
+                    div [] [text "External"]
+                  GraphImplementation _ ->
+                    div [] [text "Graph"]
       ]
     ]
   }
+
+viewOption selectedName name display =
+  option [value name, selected (selectedName == name)] [text display]
