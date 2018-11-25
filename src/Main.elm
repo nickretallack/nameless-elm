@@ -101,7 +101,7 @@ init _ url key =
     , nibs= Dict.fromList []
     , implementation=Dict.fromList [(exampleID, ConstantImplementation "Gravity" (Float 9.8))]
     , navKey = key
-    , currentDefinitionID = Nothing
+    , currentDefinitionID = definitionIDFromUrl url
     }
   , Cmd.none)
 
@@ -123,12 +123,16 @@ isUuid maybeString =
         Ok _ -> True
         Err _ -> False
 
+definitionIDFromUrl url =
+  if (isUuid url.fragment) then Just url.path else Nothing
+
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model = 
   case msg of
     ChangedUrl url ->
-      ({model | currentDefinitionID =
-        if (isUuid url.fragment) then Just url.path else Nothing}, Cmd.none)
+      ( { model | currentDefinitionID = definitionIDFromUrl url }
+      , Cmd.none
+      )
     ClickedLink request ->
       (model, Cmd.none)
     NewConstant ->
