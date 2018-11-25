@@ -50,8 +50,18 @@ type alias DefinitionID = String
 type alias NibID = String
 type alias NodeID = String
 
+type Value
+  = Integer Int
+  | Float Float
+  | String String
+
+typeNames = 
+  [ "Integer"
+  , "Floating Point Number"
+  ]
+
 type Implementation
-  = ConstantImplementation String
+  = ConstantImplementation String Value
   | ExternalImplementation String
   | GraphImplementation
     { connections: Dict NibConnection NibConnection
@@ -89,7 +99,7 @@ init _ url key =
     { names= Dict.fromList [(exampleID, makeTranslatable "Example")]
     , descriptions= Dict.fromList [(exampleID, makeTranslatable "Description of example")]
     , nibs= Dict.fromList []
-    , implementation=Dict.fromList [(exampleID, ConstantImplementation "5")]
+    , implementation=Dict.fromList [(exampleID, ConstantImplementation "Gravity" (Float 9.8))]
     , navKey = key
     , currentDefinitionID = Nothing
     }
@@ -166,6 +176,12 @@ getName model definitionID =
 
 --view
 
+nameView model definitionID =
+  input
+    [ onInput (\text -> ChangeName definitionID text)
+    , value (getName model definitionID)
+    ] []
+  
 view : Model -> Browser.Document Msg
 view model =
   { title = "Nameless Programming Language"
@@ -178,11 +194,9 @@ view model =
           
           Just definitionID ->
             div []
-            [ text ("Editing a constant: " ++ getName model definitionID)
-            , input
-              [ onInput (\text -> ChangeName definitionID text)
-              , value (getName model definitionID)
-              ] []
+            [ text "Editing a constant: "
+            , nameView model definitionID
+
             ]
       ]
     ]
