@@ -107,13 +107,18 @@ encodeConstant value =
   Json.Encode.object
     [ ("type", Json.Encode.string "constant")
     , ("value",
-        case value of
-          Integer integer ->
-            Json.Encode.object [ ("type", Json.Encode.string "integer"), ("value", Json.Encode.int integer) ]
-          Number number ->
-            Json.Encode.object [ ("type", Json.Encode.string "number"), ("value", Json.Encode.float number) ]
-          Text text ->
-            Json.Encode.object [ ("type", Json.Encode.string "text"), ("value", Json.Encode.string text) ]
+        let
+          (name, jsonValue) = 
+            case value of
+              Integer integer ->
+                ("integer", Json.Encode.int integer)
+              Number number ->
+                ("number", Json.Encode.float number)
+              Text text ->
+                ("text", Json.Encode.string text)
+        in Json.Encode.object
+          [ ("type", Json.Encode.string name)
+          , ("value", jsonValue) ]
       )
     ]
 
