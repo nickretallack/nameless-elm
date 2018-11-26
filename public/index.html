@@ -3,7 +3,10 @@
 <body>
 	<script>
 		var app = Elm.Main.init({
-			flags: localStorage.getItem('state'),
+			flags: {
+				state: localStorage.getItem('state'),
+				language: navigator.language,
+			},
 		})
 		app.ports.saveState.subscribe(function(state) {
 			localStorage.setItem('state', JSON.stringify(state))

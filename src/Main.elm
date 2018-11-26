@@ -20,7 +20,7 @@ googleApiKey = "AIzaSyDyNAGC8MhTFPrUoYY4RHENX9M4ZcfEIis"
 
 -- main
 
-main : Program String Model Msg
+main : Program Json.Encode.Value Model Msg
 main =
   Browser.application
     { init = init
@@ -30,6 +30,11 @@ main =
     , onUrlRequest = ClickedLink
     , onUrlChange = ChangedUrl
     }
+
+type alias Flags =
+  { state: String
+  , language: String
+  }
 
 -- model
 
@@ -161,6 +166,8 @@ type alias Model =
   , currentDefinitionID: Maybe DefinitionID
   , randomSeed: Random.Seed
   , languageChoices: List (String, String)
+  , failedLoad: Bool
+  , language: Language
   }
 
 type alias SerializableModel =
@@ -171,18 +178,26 @@ type alias SerializableModel =
   }
 
 exampleID = "695eec7b-3084-40e3-994b-59028c466d1e"
-init : String -> Url -> Nav.Key -> (Model, Cmd Msg)
-init initialJson url key = 
-  case Json.Decode.decodeString decodeState initialJson of
-    Ok initialState ->
-      makeInitialState (log "Initial!" initialState) url key
+init : Json.Encode.Value -> Url -> Nav.Key -> (Model, Cmd Msg)
+init flagsJson url key = 
+  case Json.Decode.decodeValue decodeFlags flagsJson of
+    Ok {language, state} ->
+      if state == ""
+      then makeInitialState exampleState language url key False
+      else
+        case Json.Decode.decodeString decodeState state of
+          Ok initialState ->
+            makeInitialState (log "Initial!" initialState) language url key False
 
+          Err error ->
+            let
+              _ = log "Failed to parse the state: " error
+              _ = log "State was: " flagsJson
+            in
+            makeInitialState exampleState language url key True
     Err error ->
-      let
-        _ = log "error" error
-        _ = log "state" initialJson
-      in
-      makeInitialState exampleState url key
+      let _ = log "Bad flags passed to init: " error in
+      makeInitialState exampleState "en" url key True
 
 exampleState : SerializableModel
 exampleState =
@@ -193,8 +208,8 @@ exampleState =
   [ (exampleID, ConstantImplementation (Number 9.8))]
   } 
 
-makeInitialState : SerializableModel -> Url -> Nav.Key -> (Model, Cmd Msg)
-makeInitialState initialState url key = 
+makeInitialState : SerializableModel -> Language -> Url -> Nav.Key -> Bool -> (Model, Cmd Msg)
+makeInitialState initialState language url key failedLoad = 
   ( { names = initialState.names
     , descriptions = initialState.descriptions
     , nibs = initialState.nibs
@@ -203,13 +218,14 @@ makeInitialState initialState url key =
     , currentDefinitionID = definitionIDFromUrl url
     , randomSeed = Random.initialSeed 0
     , languageChoices = []
+    , failedLoad = failedLoad
+    , language = language
     }
   , Http.post
       { url = "https://translation.googleapis.com/language/translate/v2/languages?key=" ++ googleApiKey
       , body = Http.jsonBody (Json.Encode.object [("target", Json.Encode.string "en")])
       , expect = Http.expectJson GotLanguageChoices languageChoiceDecoder
       }
-  
   )
 
 -- curl -X POST \
@@ -239,7 +255,13 @@ decodeState =
     ( Json.Decode.field "descriptions" decodeTranslatableDict )
     ( Json.Decode.field "nibs" decodeTranslatableDict )
     ( Json.Decode.field "implementations" (Json.Decode.dict decodeImplementation))
-    
+
+decodeFlags : Json.Decode.Decoder Flags
+decodeFlags =
+  Json.Decode.map2
+    (\language state -> {language=language, state=state})
+    ( Json.Decode.field "language" Json.Decode.string )
+    ( Json.Decode.field "state" Json.Decode.string )
 
 -- update
 
