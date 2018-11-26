@@ -45,17 +45,17 @@ type alias Language = String
 
 currentLanguage = "en"
 
-makeTranslatable : String -> TranslatableString
-makeTranslatable string =
-  Dict.fromList [(currentLanguage, string)]
+makeTranslatable : Language -> String -> TranslatableString
+makeTranslatable language string =
+  Dict.fromList [(language, string)]
 
-getTranslatable : TranslatableString -> String
-getTranslatable dict =
-  Maybe.withDefault "" (Dict.get currentLanguage dict)
+getTranslatable : Language -> TranslatableString -> String
+getTranslatable language dict =
+  Maybe.withDefault "" (Dict.get language dict)
 
-updateTranslatable : TranslatableString -> String -> TranslatableString
-updateTranslatable dict string =
-  Dict.insert currentLanguage string dict 
+updateTranslatable : Language -> TranslatableString -> String -> TranslatableString
+updateTranslatable language dict string =
+  Dict.insert language string dict 
 
 encodeTranslatable : TranslatableString -> Json.Encode.Value
 encodeTranslatable dict =
@@ -201,8 +201,8 @@ init flagsJson url key =
 
 exampleState : SerializableModel
 exampleState =
-  { names= Dict.fromList [(exampleID, makeTranslatable "Example")]
-  , descriptions= Dict.fromList [(exampleID, makeTranslatable "Description of example")]
+  { names= Dict.fromList [(exampleID, makeTranslatable "en" "Example")]
+  , descriptions= Dict.fromList [(exampleID, makeTranslatable "en" "Description of example")]
   , nibs= Dict.fromList []
   , implementations=Dict.fromList
   [ (exampleID, ConstantImplementation (Number 9.8))]
@@ -274,6 +274,7 @@ type Msg
   | NoOp
   | SaveState
   | GotLanguageChoices (Result Http.Error (List (String, String)) )
+  | ChangeLanguage Language
 
 languageChoiceDecoder =
   Json.Decode.field "data"
@@ -320,7 +321,7 @@ update msg model =
       let (uuid, newSeed) = makeUuid initialSeed in
       ( { model
         | names =
-          Dict.insert uuid (makeTranslatable "") model.names
+          Dict.insert uuid (makeTranslatable model.language "") model.names
         , implementations =
           Dict.insert uuid (ConstantImplementation (Text "")) model.implementations
         }
@@ -331,9 +332,9 @@ update msg model =
           Dict.update uuid (\maybeName ->
             case maybeName of
               Nothing ->
-                Just (makeTranslatable newName)
+                Just (makeTranslatable model.language newName)
               Just name ->
-                Just (updateTranslatable name newName)
+                Just (updateTranslatable model.language name newName)
           ) model.names
         }
       , Cmd.none
@@ -355,7 +356,9 @@ update msg model =
         Err error ->
           let _ = log "Error loading language choices: " error
           in ( model, Cmd.none )
-
+    ChangeLanguage language ->
+      ( {model | language = language}
+      , Cmd.none ) -- TODO: fetch translations
 
 makeUuid seed = 
   let (uuid, newSeed) = Random.step UUID.generator seed in (UUID.canonical uuid, newSeed)
@@ -379,7 +382,7 @@ getName model definitionID =
     Nothing ->
       ""
     Just translatableString ->
-      getTranslatable translatableString
+      getTranslatable model.language translatableString
 
 --view
 
@@ -405,7 +408,7 @@ view model =
             [ h1 [] [text "Definitions"]
             , ul []
               (List.map (\(definitionID, translatableName) ->
-                let name = getTranslatable translatableName in
+                let name = getTranslatable model.language translatableName in
                 li []
                 [ a [href ("#" ++ definitionID)]
                   [ text (if name == "" then "(nameless)" else name)] ]
@@ -508,4 +511,5 @@ viewOption selectedName name display =
 
 viewLanguageSelector : Model -> Html Msg
 viewLanguageSelector model =
-  select [] (List.map (\(code, name) -> viewOption model.language code name) model.languageChoices)
+  select [onChange (\value -> ChangeLanguage value)]
+  (List.map (\(code, name) -> viewOption model.language code name) model.languageChoices)
