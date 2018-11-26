@@ -432,6 +432,7 @@ viewConstant model definitionID constantValue =
   let typeName = valueToTypeString constantValue in
   div []
   [ text ("Editing a constant: " ++ valueAsText constantValue)
+  , viewLanguageSelector model
   , nameView model definitionID
   , select [onChange (\type_ ->
     ChangeConstantValue definitionID (
@@ -504,3 +505,7 @@ valueAsText value =
 
 viewOption selectedName name display =
   option [value name, selected (selectedName == name)] [text display]
+
+viewLanguageSelector : Model -> Html Msg
+viewLanguageSelector model =
+  select [] (List.map (\(code, name) -> viewOption model.language code name) model.languageChoices)
