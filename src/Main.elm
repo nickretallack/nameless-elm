@@ -5,7 +5,7 @@ import Html exposing (..)
 import Html.Attributes exposing (..)
 import Html.Events exposing (onClick, onInput, on, targetValue)
 import Dict exposing (Dict)
-import Random
+import Random exposing (Seed)
 import UUID exposing (UUID)
 import Debug exposing (log)
 import Json.Decode as Json
@@ -91,9 +91,10 @@ type alias Model =
   , implementations: Dict DefinitionID Implementation
   , navKey: Nav.Key
   , currentDefinitionID: Maybe DefinitionID
+  , randomSeed: Random.Seed
   }
 
-exampleID = "695eec7b-3084-40e3-994b-59028c466d1d"
+exampleID = "695eec7b-3084-40e3-994b-59028c466d1e"
 init : () -> Url -> Nav.Key -> (Model, Cmd Msg)
 init _ url key = 
   (
@@ -105,6 +106,7 @@ init _ url key =
       ] 
     , navKey = key
     , currentDefinitionID = definitionIDFromUrl url
+    , randomSeed = Random.initialSeed 0
     }
   , Cmd.none)
 
@@ -221,8 +223,11 @@ view model =
             div []
             [ h1 [] [text "Definitions"]
             , ul []
-              (List.map (\(definitionID, name) ->
-                a [href ("#" ++ definitionID)] [text (getTranslatable name)]
+              (List.map (\(definitionID, translatableName) ->
+                let name = getTranslatable translatableName in
+                li []
+                [ a [href ("#" ++ definitionID)]
+                  [ text (if name == "" then "(nameless)" else name)] ]
               ) (Dict.toList model.names))
             ]
           
