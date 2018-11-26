@@ -142,7 +142,11 @@ update msg model =
       , Cmd.none
       )
     ClickedLink request ->
-      (model, Cmd.none)
+      case request of
+        Browser.Internal url ->
+          ( model , Nav.pushUrl model.navKey (Url.toString url))
+        Browser.External href ->
+          ( model, Nav.load href )
     NewConstant ->
       let (uuid, newSeed) = makeUuid initialSeed in
       ( { model
@@ -214,7 +218,13 @@ view model =
       [ button [onClick NewConstant] [text "New Constant"]
       , case model.currentDefinitionID of
           Nothing ->
-            div [] [text "Not editing a constant"]
+            div []
+            [ h1 [] [text "Definitions"]
+            , ul []
+              (List.map (\(definitionID, name) ->
+                a [href ("#" ++ definitionID)] [text (getTranslatable name)]
+              ) (Dict.toList model.names))
+            ]
           
           Just definitionID ->
             case Dict.get definitionID model.implementations of
