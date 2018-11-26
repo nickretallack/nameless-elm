@@ -223,67 +223,7 @@ view model =
               Just implementation ->
                 case implementation of
                   ConstantImplementation constantValue ->
-                    let typeName = valueToTypeString constantValue in
-                    div []
-                    [ text ("Editing a constant: " ++ valueAsText constantValue)
-                    , nameView model definitionID
-                    , select [onChange (\type_ ->
-                      ChangeConstantValue definitionID (
-                          case type_ of
-                            "text" ->
-                              Text (valueAsText constantValue)
-
-                            "integer" ->
-                              case constantValue of
-                                Number number ->
-                                  Integer (round number)
-                                _ ->
-                                  case String.toInt (valueAsText constantValue) of
-                                    Nothing ->
-                                      Integer 0
-                                    Just newNumber ->
-                                      Integer newNumber
-                            "number" ->
-                              case String.toFloat (valueAsText constantValue) of
-                                Nothing ->
-                                  Number 0.0
-                                Just newNumber ->
-                                  Number newNumber
-                            _ -> constantValue
-                        ))] 
-                      [ viewOption typeName "integer" "Integer"
-                      , viewOption typeName "number" "Number"
-                      , viewOption typeName "text" "Text"
-                      ]
-                    , case constantValue of
-                        Text string ->
-                          textarea
-                            [ onChange (\value -> ChangeConstantValue definitionID (Text value))]
-                            [text string]
-                        Number number ->
-                          input
-                            [ type_ "number"
-                            , step "any"
-                            , value (String.fromFloat number)
-                            , onChange (\value ->
-                              case String.toFloat value of
-                                Nothing ->
-                                  NoOp
-                                Just newNumber ->
-                                  ChangeConstantValue definitionID (Number newNumber))
-                            ] []
-                        Integer integer ->
-                          input
-                            [ type_ "number"
-                            , value (String.fromInt integer)
-                            , onChange (\value ->
-                              case String.toInt value of
-                                Nothing ->
-                                  NoOp
-                                Just newInteger ->
-                                  ChangeConstantValue definitionID (Integer newInteger))
-                            ] []
-                    ]
+                    viewConstant model definitionID constantValue
                   ExternalImplementation _ ->
                     div [] [text "External"]
                   GraphImplementation _ ->
@@ -291,6 +231,70 @@ view model =
       ]
     ]
   }
+
+viewConstant model definitionID constantValue =
+  let typeName = valueToTypeString constantValue in
+  div []
+  [ text ("Editing a constant: " ++ valueAsText constantValue)
+  , nameView model definitionID
+  , select [onChange (\type_ ->
+    ChangeConstantValue definitionID (
+      case type_ of
+        "text" ->
+          Text (valueAsText constantValue)
+
+        "integer" ->
+          case constantValue of
+            Number number ->
+              Integer (round number)
+            _ ->
+              case String.toInt (valueAsText constantValue) of
+                Nothing ->
+                  Integer 0
+                Just newNumber ->
+                  Integer newNumber
+        "number" ->
+          case String.toFloat (valueAsText constantValue) of
+            Nothing ->
+              Number 0.0
+            Just newNumber ->
+              Number newNumber
+        _ -> constantValue
+      ))] 
+    [ viewOption typeName "integer" "Integer"
+    , viewOption typeName "number" "Number"
+    , viewOption typeName "text" "Text"
+    ]
+  , case constantValue of
+      Text string ->
+        textarea
+          [ onChange (\value -> ChangeConstantValue definitionID (Text value))]
+          [text string]
+      Number number ->
+        input
+          [ type_ "number"
+          , step "any"
+          , value (String.fromFloat number)
+          , onChange (\value ->
+            case String.toFloat value of
+              Nothing ->
+                NoOp
+              Just newNumber ->
+                ChangeConstantValue definitionID (Number newNumber))
+          ] []
+      Integer integer ->
+        input
+          [ type_ "number"
+          , value (String.fromInt integer)
+          , onChange (\value ->
+            case String.toInt value of
+              Nothing ->
+                NoOp
+              Just newInteger ->
+                ChangeConstantValue definitionID (Integer newInteger))
+          ] []
+  ]
+
 
 valueAsText : Value -> String
 valueAsText value =
