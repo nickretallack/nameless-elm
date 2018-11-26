@@ -2,6 +2,11 @@
 <script src="main.js"></script>
 <body>
 	<script>
-		var app = Elm.Main.init()
+		var app = Elm.Main.init({
+			flags: localStorage.getItem('state'),
+		})
+		app.ports.saveState.subscribe(function(state) {
+			localStorage.setItem('state', JSON.stringify(state))
+		})
 	</script>
 </body>

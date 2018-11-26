@@ -1,3 +1,4 @@
+port module Main exposing (..)
 import Browser
 import Browser.Navigation as Nav
 import Url exposing (Url)
@@ -8,7 +9,11 @@ import Dict exposing (Dict)
 import Random exposing (Seed)
 import UUID exposing (UUID)
 import Debug exposing (log)
-import Json.Decode as Json
+import Json.Decode
+import Json.Encode
+import Time 
+
+port saveState : Json.Encode.Value -> Cmd msg
 
 -- main
 
@@ -44,6 +49,9 @@ updateTranslatable : TranslatableString -> String -> TranslatableString
 updateTranslatable dict string =
   Dict.insert currentLanguage string dict 
 
+encodeTranslatable : TranslatableString -> Json.Encode.Value
+encodeTranslatable dict =
+  Json.Encode.dict identity Json.Encode.string dict
 
 --- implementation
 
@@ -64,11 +72,32 @@ valueToTypeString value =
 
 type Implementation
   = ConstantImplementation Value
-  | ExternalImplementation String
+  | ExternalImplementation
   | GraphImplementation
     { connections: Dict NibConnection NibConnection
     , nodes: Dict NodeID Node
     }
+
+encodeImplementation : Implementation -> Json.Encode.Value
+encodeImplementation implementation =
+  case implementation of
+    ConstantImplementation value ->
+      Json.Encode.object
+        [ ("type", Json.Encode.string "constant")
+        , ("value",
+            case value of
+              Integer integer ->
+                Json.Encode.object [ ("integer", Json.Encode.int integer) ]
+              Number number ->
+                Json.Encode.object [ ("number", Json.Encode.float number) ]
+              Text text ->
+                Json.Encode.object [ ("text", Json.Encode.string text) ]
+          )
+        ]
+    GraphImplementation _ ->
+      Json.Encode.string "TODO"
+    ExternalImplementation ->
+      Json.Encode.string "TODO"
 
 type NibConnection
   = NodeConnection {nibID: NibID, nodeID: NodeID}
@@ -110,6 +139,14 @@ init _ url key =
     }
   , Cmd.none)
 
+encodeState model =
+  Json.Encode.object
+    [ ("names", Json.Encode.dict identity encodeTranslatable model.names)
+    , ("descriptions", Json.Encode.dict identity encodeTranslatable model.descriptions)
+    , ("nibs", Json.Encode.dict identity encodeTranslatable model.nibs)
+    , ("implementations", Json.Encode.dict identity encodeImplementation model.implementations)
+    ]
+
 -- update
 
 type Msg
@@ -119,6 +156,7 @@ type Msg
   | ChangeName DefinitionID String
   | ChangeConstantValue DefinitionID Value
   | NoOp
+  | SaveState
 
 initialSeed = Random.initialSeed 12345
 
@@ -175,6 +213,10 @@ update msg model =
       ( { model | implementations = Dict.insert uuid (ConstantImplementation newValue) model.implementations }
       , Cmd.none
       )
+    SaveState ->
+      ( model
+      , saveState (encodeState model)
+      )
 
 makeUuid seed = 
   let (uuid, newSeed) = Random.step UUID.generator seed in (UUID.canonical uuid, newSeed)
@@ -191,7 +233,7 @@ makeUuid seed =
 
 subscriptions : Model -> Sub Msg
 subscriptions model =
-  Sub.none
+  Time.every 1000 (\_ -> SaveState)
 
 getName model definitionID =
   case Dict.get definitionID model.names of
@@ -210,7 +252,7 @@ nameView model definitionID =
 
 onChange : (String -> msg) -> Attribute msg
 onChange tagger =
-  on "input" (Json.map tagger targetValue)
+  on "input" (Json.Decode.map tagger targetValue)
 
 view : Model -> Browser.Document Msg
 view model =
@@ -239,7 +281,7 @@ view model =
                 case implementation of
                   ConstantImplementation constantValue ->
                     viewConstant model definitionID constantValue
-                  ExternalImplementation _ ->
+                  ExternalImplementation ->
                     div [] [text "External"]
                   GraphImplementation _ ->
                     div [] [text "Graph"]
