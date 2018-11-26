@@ -13,8 +13,10 @@ import Json.Decode
 import Json.Encode
 import Json.Decode.Pipeline exposing (required, optional, hardcoded)
 import Time 
+import Http 
 
 port saveState : Json.Encode.Value -> Cmd msg
+googleApiKey = "AIzaSyDyNAGC8MhTFPrUoYY4RHENX9M4ZcfEIis"
 
 -- main
 
@@ -158,6 +160,7 @@ type alias Model =
   , navKey: Nav.Key
   , currentDefinitionID: Maybe DefinitionID
   , randomSeed: Random.Seed
+  , languageChoices: List (String, String)
   }
 
 type alias SerializableModel =
@@ -181,6 +184,7 @@ init initialJson url key =
       in
       makeInitialState exampleState url key
 
+exampleState : SerializableModel
 exampleState =
   { names= Dict.fromList [(exampleID, makeTranslatable "Example")]
   , descriptions= Dict.fromList [(exampleID, makeTranslatable "Description of example")]
@@ -189,6 +193,7 @@ exampleState =
   [ (exampleID, ConstantImplementation (Number 9.8))]
   } 
 
+makeInitialState : SerializableModel -> Url -> Nav.Key -> (Model, Cmd Msg)
 makeInitialState initialState url key = 
   ( { names = initialState.names
     , descriptions = initialState.descriptions
@@ -197,8 +202,22 @@ makeInitialState initialState url key =
     , navKey = key
     , currentDefinitionID = definitionIDFromUrl url
     , randomSeed = Random.initialSeed 0
+    , languageChoices = []
     }
-  , Cmd.none)
+  , Http.post
+      { url = "https://translation.googleapis.com/language/translate/v2/languages?key=" ++ googleApiKey
+      , body = Http.jsonBody (Json.Encode.object [("target", Json.Encode.string "en")])
+      , expect = Http.expectJson GotLanguageChoices languageChoiceDecoder
+      }
+  
+  )
+
+-- curl -X POST \
+--      -H "Content-Type: application/json; charset=utf-8" \
+--      --data "{
+--   'target': 'en'
+-- }" "https://translation.googleapis.com/language/translate/v2/languages?key=AIzaSyDyNAGC8MhTFPrUoYY4RHENX9M4ZcfEIis"
+
 
 encodeState : Model -> Json.Encode.Value
 encodeState model =
@@ -232,6 +251,19 @@ type Msg
   | ChangeConstantValue DefinitionID Value
   | NoOp
   | SaveState
+  | GotLanguageChoices (Result Http.Error (List (String, String)) )
+
+languageChoiceDecoder =
+  Json.Decode.field "data"
+    ( Json.Decode.field "languages"
+      ( Json.Decode.list
+        ( Json.Decode.map2
+          (\code name -> (code, name))
+          (Json.Decode.field "language" Json.Decode.string)
+          (Json.Decode.field "name" Json.Decode.string)
+        )
+      )
+    )
 
 initialSeed = Random.initialSeed 12345
 
@@ -292,6 +324,16 @@ update msg model =
       ( model
       , saveState (encodeState model)
       )
+    GotLanguageChoices result ->
+      case result of 
+        Ok choices ->
+          ( { model | languageChoices = choices }
+          , Cmd.none
+          )
+        Err error ->
+          let _ = log "Error loading language choices: " error
+          in ( model, Cmd.none )
+
 
 makeUuid seed = 
   let (uuid, newSeed) = Random.step UUID.generator seed in (UUID.canonical uuid, newSeed)
