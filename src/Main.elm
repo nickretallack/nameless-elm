@@ -11,13 +11,14 @@ import UUID exposing (UUID)
 import Debug exposing (log)
 import Json.Decode
 import Json.Encode
+import Json.Decode.Pipeline exposing (required, optional, hardcoded)
 import Time 
 
 port saveState : Json.Encode.Value -> Cmd msg
 
 -- main
 
-main : Program () Model Msg
+main : Program String Model Msg
 main =
   Browser.application
     { init = init
@@ -53,6 +54,10 @@ encodeTranslatable : TranslatableString -> Json.Encode.Value
 encodeTranslatable dict =
   Json.Encode.dict identity Json.Encode.string dict
 
+decodeTranslatable : Json.Decode.Decoder TranslatableString
+decodeTranslatable =
+  Json.Decode.dict Json.Decode.string
+
 --- implementation
 
 type alias DefinitionID = String 
@@ -82,22 +87,49 @@ encodeImplementation : Implementation -> Json.Encode.Value
 encodeImplementation implementation =
   case implementation of
     ConstantImplementation value ->
-      Json.Encode.object
-        [ ("type", Json.Encode.string "constant")
-        , ("value",
-            case value of
-              Integer integer ->
-                Json.Encode.object [ ("integer", Json.Encode.int integer) ]
-              Number number ->
-                Json.Encode.object [ ("number", Json.Encode.float number) ]
-              Text text ->
-                Json.Encode.object [ ("text", Json.Encode.string text) ]
-          )
-        ]
+      encodeConstant value
     GraphImplementation _ ->
       Json.Encode.string "TODO"
     ExternalImplementation ->
       Json.Encode.string "TODO"
+
+decodeImplementation : Json.Decode.Decoder Implementation
+decodeImplementation =
+  Json.Decode.field "type" Json.Decode.string |> Json.Decode.andThen (\type_ ->
+    case type_ of
+      "constant" ->
+        Json.Decode.map ConstantImplementation (Json.Decode.field "value" valueDecoder)
+      _ -> Json.Decode.fail <| "Unknown implementation type: " ++ type_
+  )
+
+encodeConstant : Value -> Json.Encode.Value
+encodeConstant value =
+  Json.Encode.object
+    [ ("type", Json.Encode.string "constant")
+    , ("value",
+        case value of
+          Integer integer ->
+            Json.Encode.object [ ("type", Json.Encode.string "integer"), ("value", Json.Encode.int integer) ]
+          Number number ->
+            Json.Encode.object [ ("type", Json.Encode.string "number"), ("value", Json.Encode.float number) ]
+          Text text ->
+            Json.Encode.object [ ("type", Json.Encode.string "text"), ("value", Json.Encode.string text) ]
+      )
+    ]
+
+valueDecoder : Json.Decode.Decoder Value
+valueDecoder =
+  Json.Decode.field "type" Json.Decode.string |> Json.Decode.andThen (\type_ ->
+    case type_ of
+      "integer" ->
+        Json.Decode.map Integer (Json.Decode.field "value" Json.Decode.int) 
+      "number" ->
+        Json.Decode.map Number (Json.Decode.field "value" Json.Decode.float) 
+      "text" ->
+        Json.Decode.map Text (Json.Decode.field "value" Json.Decode.string) 
+      _ ->
+        Json.Decode.fail <| "Unknown value type: " ++ type_
+  )
 
 type NibConnection
   = NodeConnection {nibID: NibID, nodeID: NodeID}
@@ -123,22 +155,47 @@ type alias Model =
   , randomSeed: Random.Seed
   }
 
+type alias SerializableModel =
+  { names: Dict DefinitionID TranslatableString
+  , descriptions: Dict DefinitionID TranslatableString
+  , nibs: Dict NibID TranslatableString
+  , implementations: Dict DefinitionID Implementation
+  }
+
 exampleID = "695eec7b-3084-40e3-994b-59028c466d1e"
-init : () -> Url -> Nav.Key -> (Model, Cmd Msg)
-init _ url key = 
-  (
-    { names= Dict.fromList [(exampleID, makeTranslatable "Example")]
-    , descriptions= Dict.fromList [(exampleID, makeTranslatable "Description of example")]
-    , nibs= Dict.fromList []
-    , implementations=Dict.fromList
-      [ (exampleID, ConstantImplementation (Number 9.8))
-      ] 
+init : String -> Url -> Nav.Key -> (Model, Cmd Msg)
+init initialJson url key = 
+  case Json.Decode.decodeString decodeState initialJson of
+    Ok initialState ->
+      makeInitialState (log "Initial!" initialState) url key
+
+    Err error ->
+      let
+        _ = log "error" error
+        _ = log "state" initialJson
+      in
+      makeInitialState exampleState url key
+
+exampleState =
+  { names= Dict.fromList [(exampleID, makeTranslatable "Example")]
+  , descriptions= Dict.fromList [(exampleID, makeTranslatable "Description of example")]
+  , nibs= Dict.fromList []
+  , implementations=Dict.fromList
+  [ (exampleID, ConstantImplementation (Number 9.8))]
+  } 
+
+makeInitialState initialState url key = 
+  ( { names = initialState.names
+    , descriptions = initialState.descriptions
+    , nibs = initialState.nibs
+    , implementations = initialState.implementations
     , navKey = key
     , currentDefinitionID = definitionIDFromUrl url
     , randomSeed = Random.initialSeed 0
     }
   , Cmd.none)
 
+encodeState : Model -> Json.Encode.Value
 encodeState model =
   Json.Encode.object
     [ ("names", Json.Encode.dict identity encodeTranslatable model.names)
@@ -146,6 +203,19 @@ encodeState model =
     , ("nibs", Json.Encode.dict identity encodeTranslatable model.nibs)
     , ("implementations", Json.Encode.dict identity encodeImplementation model.implementations)
     ]
+
+decodeTranslatableDict =
+  Json.Decode.dict decodeTranslatable
+
+decodeState : Json.Decode.Decoder SerializableModel
+decodeState =
+  Json.Decode.map4
+    (\names descriptions nibs implementations -> {names=names, descriptions=descriptions, nibs=nibs, implementations=implementations})
+    ( Json.Decode.field "names" decodeTranslatableDict )
+    ( Json.Decode.field "descriptions" decodeTranslatableDict )
+    ( Json.Decode.field "nibs" decodeTranslatableDict )
+    ( Json.Decode.field "implementations" (Json.Decode.dict decodeImplementation))
+    
 
 -- update
 
