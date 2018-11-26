@@ -115,7 +115,8 @@ type Msg
   | ClickedLink Browser.UrlRequest
   | NewConstant
   | ChangeName DefinitionID String
-  | ChangeConstantType DefinitionID String
+  | ChangeConstantValue DefinitionID Value
+  | NoOp
 
 initialSeed = Random.initialSeed 12345
 
@@ -134,6 +135,8 @@ definitionIDFromUrl url =
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model = 
   case msg of
+    NoOp ->
+      ( model, Cmd.none )
     ChangedUrl url ->
       ( { model | currentDefinitionID = definitionIDFromUrl url }
       , Cmd.none
@@ -162,8 +165,8 @@ update msg model =
         }
       , Cmd.none
       )
-    ChangeConstantType uuid newType ->
-      ( model
+    ChangeConstantValue uuid newValue ->
+      ( { model | implementations = Dict.insert uuid (ConstantImplementation newValue) model.implementations }
       , Cmd.none
       )
 
@@ -214,7 +217,7 @@ view model =
             div [] [text "Not editing a constant"]
           
           Just definitionID ->
-            case Dict.get (log "current definition" definitionID) model.implementations of
+            case Dict.get definitionID model.implementations of
               Nothing ->
                 div [] [text "404"]
               Just implementation ->
@@ -222,20 +225,64 @@ view model =
                   ConstantImplementation constantValue ->
                     let typeName = valueToTypeString constantValue in
                     div []
-                    [ text "Editing a constant: "
+                    [ text ("Editing a constant: " ++ valueAsText constantValue)
                     , nameView model definitionID
-                    , select [onChange (\type_ -> ChangeConstantType definitionID type_)] 
+                    , select [onChange (\type_ ->
+                      ChangeConstantValue definitionID (
+                          case type_ of
+                            "text" ->
+                              Text (valueAsText constantValue)
+
+                            "integer" ->
+                              case constantValue of
+                                Number number ->
+                                  Integer (round number)
+                                _ ->
+                                  case String.toInt (valueAsText constantValue) of
+                                    Nothing ->
+                                      Integer 0
+                                    Just newNumber ->
+                                      Integer newNumber
+                            "number" ->
+                              case String.toFloat (valueAsText constantValue) of
+                                Nothing ->
+                                  Number 0.0
+                                Just newNumber ->
+                                  Number newNumber
+                            _ -> constantValue
+                        ))] 
                       [ viewOption typeName "integer" "Integer"
                       , viewOption typeName "number" "Number"
                       , viewOption typeName "text" "Text"
                       ]
                     , case constantValue of
                         Text string ->
-                          textarea [] [text string]
+                          textarea
+                            [ onChange (\value -> ChangeConstantValue definitionID (Text value))]
+                            [text string]
                         Number number ->
-                          input [type_ "number", step "any", value (String.fromFloat number)] []
+                          input
+                            [ type_ "number"
+                            , step "any"
+                            , value (String.fromFloat number)
+                            , onChange (\value ->
+                              case String.toFloat value of
+                                Nothing ->
+                                  NoOp
+                                Just newNumber ->
+                                  ChangeConstantValue definitionID (Number newNumber))
+                            ] []
                         Integer integer ->
-                          input [type_ "number", value (String.fromInt integer)] []
+                          input
+                            [ type_ "number"
+                            , value (String.fromInt integer)
+                            , onChange (\value ->
+                              case String.toInt value of
+                                Nothing ->
+                                  NoOp
+                                Just newInteger ->
+                                  ChangeConstantValue definitionID (Integer newInteger))
+                            ] []
                     ]
                   ExternalImplementation _ ->
                     div [] [text "External"]
@@ -244,6 +291,16 @@ view model =
       ]
     ]
   }
+
+valueAsText : Value -> String
+valueAsText value =
+  case value of
+    Text text ->
+      text
+    Number number ->
+      String.fromFloat number
+    Integer integer ->
+      String.fromInt integer
 
 viewOption selectedName name display =
   option [value name, selected (selectedName == name)] [text display]
