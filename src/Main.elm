@@ -40,30 +40,60 @@ type alias Flags =
 
 --- documentation
 
-type alias TranslatableString = Dict Language String
+type alias TranslatableString = 
+  { sourceLanguage: Language
+  , translations: Dict Language VettableString
+  }
 type alias Language = String
+
+type alias VettableString =
+  { string: String
+  , vetted: Bool}
 
 currentLanguage = "en"
 
 makeTranslatable : Language -> String -> TranslatableString
 makeTranslatable language string =
-  Dict.fromList [(language, string)]
+  TranslatableString language (Dict.fromList [(language, VettableString string True)])
 
 getTranslatable : Language -> TranslatableString -> String
-getTranslatable language dict =
-  Maybe.withDefault "" (Dict.get language dict)
+getTranslatable language translatable =
+  case Dict.get language translatable.translations of
+    Nothing ->
+      ""
+    Just vettableString ->
+      vettableString.string
 
 updateTranslatable : Language -> TranslatableString -> String -> TranslatableString
-updateTranslatable language dict string =
-  Dict.insert language string dict 
-
+updateTranslatable language translatable string =
+  { translatable | translations =
+    Dict.insert language (VettableString string False) translatable.translations }
+   
 encodeTranslatable : TranslatableString -> Json.Encode.Value
-encodeTranslatable dict =
-  Json.Encode.dict identity Json.Encode.string dict
+encodeTranslatable translatable =
+  Json.Encode.object
+  [ ("sourceLanguage", Json.Encode.string translatable.sourceLanguage)
+  , ("translations", Json.Encode.dict identity encodeVettable translatable.translations)
+  ]
+
+encodeVettable vettable =
+  Json.Encode.object
+  [ ("string", Json.Encode.string vettable.string)
+  , ("vetted", Json.Encode.bool vettable.vetted)
+  ]
 
 decodeTranslatable : Json.Decode.Decoder TranslatableString
 decodeTranslatable =
-  Json.Decode.dict Json.Decode.string
+  Json.Decode.map2
+  (\sourceLanguage translations -> TranslatableString sourceLanguage translations)
+  (Json.Decode.field "sourceLanguage" Json.Decode.string)
+  (Json.Decode.field "translations" (Json.Decode.dict decodeVettable))
+  
+decodeVettable =
+  Json.Decode.map2
+  (\string vetted -> VettableString string vetted)
+  (Json.Decode.field "string" Json.Decode.string)
+  (Json.Decode.field "vetted" Json.Decode.bool)
 
 --- implementation
 
@@ -301,6 +331,7 @@ definitionIDFromUrl url =
     Nothing -> Nothing
     Just fragment ->
       if (isUuid fragment) then Just fragment else Nothing
+
 
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model = 
