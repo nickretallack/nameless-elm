@@ -146,6 +146,15 @@ type Value
     | Text String
 
 
+type Type
+    = IntegerType
+    | NumberType
+    | TextType
+    | RecordType DefinitionID
+    | UnionType DefinitionID
+    | FunctionPointerType DefinitionID
+
+
 valueToTypeString value =
     case value of
         Integer _ ->
@@ -160,11 +169,24 @@ valueToTypeString value =
 
 type Implementation
     = ConstantImplementation Value
-    | ExternalImplementation
+    | ExternalImplementation Interface String
     | GraphImplementation
         { connections : Dict NibConnection NibConnection
         , nodes : Dict NodeID Node
         }
+    | InterfaceImplementation Interface
+    | RecordTypeImplementation TypeImplementation
+    | UnionTypeImplementation TypeImplementation
+
+
+type alias Interface =
+    { inputTypes : Dict NibID Type
+    , outputTypes : Dict NibID Type
+    }
+
+
+type alias TypeImplementation =
+    { fieldTypes : Dict NibID Type }
 
 
 encodeImplementation : Implementation -> Json.Encode.Value
@@ -176,7 +198,16 @@ encodeImplementation implementation =
         GraphImplementation _ ->
             Json.Encode.string "TODO"
 
-        ExternalImplementation ->
+        ExternalImplementation _ _ ->
+            Json.Encode.string "TODO"
+
+        InterfaceImplementation _ ->
+            Json.Encode.string "TODO"
+
+        RecordTypeImplementation _ ->
+            Json.Encode.string "TODO"
+
+        UnionTypeImplementation _ ->
             Json.Encode.string "TODO"
 
 
@@ -623,11 +654,20 @@ view model =
                                 ConstantImplementation constantValue ->
                                     viewConstant model definitionID constantValue
 
-                                ExternalImplementation ->
+                                ExternalImplementation _ _ ->
                                     div [] [ text "External" ]
 
                                 GraphImplementation _ ->
                                     div [] [ text "Graph" ]
+
+                                InterfaceImplementation _ ->
+                                    div [] [ text "Interface" ]
+
+                                RecordTypeImplementation _ ->
+                                    div [] [ text "Record" ]
+
+                                UnionTypeImplementation _ ->
+                                    div [] [ text "Union" ]
             ]
         ]
     }
