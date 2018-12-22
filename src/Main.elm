@@ -290,15 +290,15 @@ getFullDependenciesWorker definitionID implementations visited =
             in
             Set.foldl
                 (\childDefinitionID acc ->
-                    Result.andThen
-                        (\set ->
-                            Result.andThen
-                                (\items ->
-                                    Ok (Set.union set items)
-                                )
-                                (getFullDependenciesWorker childDefinitionID implementations set)
-                        )
-                        acc
+                    acc
+                        |> Result.andThen
+                            (\set ->
+                                getFullDependenciesWorker childDefinitionID implementations set
+                                    |> Result.andThen
+                                        (\items ->
+                                            Ok (Set.union set items)
+                                        )
+                            )
                 )
                 (Ok allDependencies)
                 newDependencies
