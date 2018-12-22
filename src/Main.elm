@@ -13,6 +13,7 @@ import Json.Decode
 import Json.Decode.Pipeline exposing (hardcoded, optional, required)
 import Json.Encode
 import Random exposing (Seed)
+import Set exposing (Set)
 import Time
 import UUID exposing (UUID)
 import Url exposing (Url)
@@ -175,7 +176,7 @@ type ConnectionNode
 
 type ConnectionNib
     = Nib NibID
-    | Value
+    | ValueNib
 
 
 type alias NibConnection =
@@ -196,14 +197,36 @@ comparableNodeConnection value =
         Nib nib_id ->
             nib_id
 
-        Value ->
+        ValueNib ->
             ""
     )
 
 
 type Node
-    = CallNode DefinitionID
-    | ValueNode DefinitionID
+    = DefinedNode
+        { kind : DefinedNodeType
+        , definitionID : DefinitionID
+        }
+    | ReferenceNode
+
+
+getNodeDefinitionID : Node -> Maybe DefinitionID
+getNodeDefinitionID node =
+    case node of
+        DefinedNode { definitionID } ->
+            Just definitionID
+
+        _ ->
+            Nothing
+
+
+type DefinedNodeType
+    = FunctionCallNode
+    | ValueNode
+    | FunctionPointerCallNode
+    | FunctionDefinitionNode
+    | ConstructorNode
+    | AccessorNode
 
 
 
@@ -216,13 +239,71 @@ type Node
 type Implementation
     = ConstantImplementation Value
     | ExternalImplementation Interface String
-    | GraphImplementation
-        { connections : Connections
-        , nodes : Dict NodeID Node
-        }
+    | GraphImplementation GraphImplementationRecord
     | InterfaceImplementation Interface
     | RecordTypeImplementation TypeImplementation
     | UnionTypeImplementation TypeImplementation
+
+
+type alias GraphImplementationRecord =
+    { connections : Connections
+    , nodes : Dict NodeID Node
+    }
+
+
+getGraphDirectDependencies : GraphImplementationRecord -> Set DefinitionID
+getGraphDirectDependencies graph_implementation =
+    Set.fromList (List.filterMap getNodeDefinitionID (Dict.values graph_implementation.nodes))
+
+
+getDirectDependencies : Implementation -> Set DefinitionID
+getDirectDependencies implementation =
+    case implementation of
+        GraphImplementation record ->
+            getGraphDirectDependencies record
+
+        _ ->
+            Set.empty
+
+
+getFullDependencies : DefinitionID -> Implementations -> Result String (Set DefinitionID)
+getFullDependencies definitionID implementations =
+    getFullDependenciesWorker definitionID implementations Set.empty
+
+
+getFullDependenciesWorker : DefinitionID -> Implementations -> Set DefinitionID -> Result String (Set DefinitionID)
+getFullDependenciesWorker definitionID implementations visited =
+    case Dict.get definitionID implementations of
+        Nothing ->
+            Err "Definition not found"
+
+        Just implementation ->
+            let
+                directDependencies =
+                    getDirectDependencies implementation
+
+                newDependencies =
+                    Set.diff directDependencies visited
+
+                allDependencies =
+                    Set.union visited directDependencies
+            in
+            Set.foldl
+                (\childDefinitionID acc ->
+                    case acc of
+                        Err error ->
+                            Err error
+
+                        Ok set ->
+                            case getFullDependenciesWorker childDefinitionID implementations set of
+                                Err error ->
+                                    Err error
+
+                                Ok items ->
+                                    Ok (Set.union set items)
+                )
+                (Ok allDependencies)
+                newDependencies
 
 
 type alias Connections =
@@ -339,11 +420,15 @@ valueDecoder =
 --- init
 
 
+type alias Implementations =
+    Dict DefinitionID Implementation
+
+
 type alias Model =
     { names : Dict DefinitionID TranslatableString
     , descriptions : Dict DefinitionID TranslatableString
     , nibs : Dict NibID TranslatableString
-    , implementations : Dict DefinitionID Implementation
+    , implementations : Implementations
     , navKey : Nav.Key
     , currentDefinitionID : Maybe DefinitionID
     , randomSeed : Random.Seed
@@ -474,17 +559,17 @@ exampleState =
               , GraphImplementation
                     { nodes =
                         Dict.fromList
-                            [ ( helloWorldConcatenateNodeID, CallNode concatenateID )
-                            , ( helloWorldHelloNodeID, ValueNode helloID )
-                            , ( helloWorldWorldNodeID, ValueNode worldID )
+                            [ ( helloWorldConcatenateNodeID, DefinedNode { kind = FunctionCallNode, definitionID = concatenateID } )
+                            , ( helloWorldHelloNodeID, DefinedNode { kind = ValueNode, definitionID = helloID } )
+                            , ( helloWorldWorldNodeID, DefinedNode { kind = ValueNode, definitionID = worldID } )
                             ]
                     , connections =
                         Dict.Any.fromList comparableNodeConnection
                             [ ( { node = Node helloWorldConcatenateNodeID, nib = Nib concatenateLeftInputID }
-                              , { node = Node helloWorldHelloNodeID, nib = Value }
+                              , { node = Node helloWorldHelloNodeID, nib = ValueNib }
                               )
                             , ( { node = Node helloWorldConcatenateNodeID, nib = Nib concatenateRightInputID }
-                              , { node = Node helloWorldWorldNodeID, nib = Value }
+                              , { node = Node helloWorldWorldNodeID, nib = ValueNib }
                               )
                             , ( { node = Graph, nib = Nib helloWorldOutputNibID }
                               , { node = Node helloWorldConcatenateNodeID, nib = Nib concatenateOutputID }
