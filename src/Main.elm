@@ -275,7 +275,7 @@ getFullDependenciesWorker : DefinitionID -> Implementations -> Set DefinitionID 
 getFullDependenciesWorker definitionID implementations visited =
     case Dict.get definitionID implementations of
         Nothing ->
-            Err "Definition not found"
+            Err ("Definition not found: " ++ definitionID)
 
         Just implementation ->
             let
@@ -304,17 +304,78 @@ getFullDependenciesWorker definitionID implementations visited =
                 newDependencies
 
 
-publish definitionID implementations =
-    Result.andThen
-        (\definitionIDs ->
-            Ok (List.filterMap (\dependencyID -> Dict.get dependencyID implementations) (Set.toList definitionIDs))
-        )
-        (getFullDependencies definitionID implementations)
+mapUntilError : (input -> Result error result) -> List input -> Result error (List result)
+mapUntilError fun list =
+    case list of
+        [] ->
+            Ok []
+
+        head :: tail ->
+            fun head
+                |> Result.andThen
+                    (\result ->
+                        mapUntilError fun tail
+                            |> Result.andThen
+                                (\rest ->
+                                    Ok (result :: rest)
+                                )
+                    )
 
 
+dictGetResult : Dict String value -> String -> Result String value
+dictGetResult dict key =
+    case Dict.get key dict of
+        Nothing ->
+            Err ("Key error: " ++ key)
 
--- topoSortDependencies : Set DefinitionID -> List DefinitionID
--- topoSortDependencies dependencies =
+        Just something ->
+            Ok something
+
+
+type alias DependencyAdjacencyList =
+    Dict DefinitionID (Set DefinitionID)
+
+
+makeDependencyAdjacencyList : DefinitionID -> Implementations -> Result String DependencyAdjacencyList
+makeDependencyAdjacencyList rootDefinitionID implementations =
+    getFullDependencies rootDefinitionID implementations
+        |> Result.andThen
+            (\definitionIDs ->
+                Set.toList definitionIDs
+                    |> mapUntilError
+                        (\definitionID ->
+                            dictGetResult implementations definitionID
+                                |> Result.andThen
+                                    (\implementation ->
+                                        Ok ( definitionID, getDirectDependencies implementation )
+                                    )
+                        )
+            )
+        |> Result.andThen (\list -> Ok (Dict.fromList list))
+
+
+topoSortDependencies : DependencyAdjacencyList -> Result String (List DefinitionID)
+topoSortDependencies dependencies =
+    if Dict.isEmpty dependencies then
+        Ok []
+
+    else
+        let
+            ( available, constrained ) =
+                dependencies |> Dict.partition (\key value -> Set.isEmpty value)
+
+            availableSet =
+                Set.fromList (Dict.keys available)
+
+            lessConstrained =
+                constrained |> Dict.map (\_ value -> Set.diff value availableSet)
+        in
+        if Set.isEmpty availableSet then
+            Err "Couldn't topologically sort the dependencies"
+
+        else
+            topoSortDependencies lessConstrained
+                |> Result.andThen (\rest -> Ok (List.append (Set.toList availableSet) rest))
 
 
 type alias Connections =
