@@ -4,6 +4,7 @@ import Browser
 import Browser.Navigation as Nav
 import Debug exposing (log)
 import Dict exposing (Dict)
+import Dict.Any
 import Html exposing (..)
 import Html.Attributes exposing (..)
 import Html.Events exposing (on, onClick, onInput, targetValue)
@@ -167,16 +168,80 @@ valueToTypeString value =
             "text"
 
 
+type ConnectionNode
+    = Node NodeID
+    | Graph
+
+
+type ConnectionNib
+    = Nib NibID
+    | Value
+
+
+type alias NibConnection =
+    { node : ConnectionNode
+    , nib : ConnectionNib
+    }
+
+
+comparableNodeConnection : NibConnection -> ( String, String )
+comparableNodeConnection value =
+    ( case value.node of
+        Node node_id ->
+            node_id
+
+        Graph ->
+            ""
+    , case value.nib of
+        Nib nib_id ->
+            nib_id
+
+        Value ->
+            ""
+    )
+
+
+type Node
+    = CallNode DefinitionID
+    | ValueNode DefinitionID
+
+
+
+-- type alias Connection =
+--     { source : NibConnection
+--     , sink : NibConnection
+--     }
+
+
 type Implementation
     = ConstantImplementation Value
     | ExternalImplementation Interface String
     | GraphImplementation
-        { connections : Dict NibConnection NibConnection
+        { connections : Connections
         , nodes : Dict NodeID Node
         }
     | InterfaceImplementation Interface
     | RecordTypeImplementation TypeImplementation
     | UnionTypeImplementation TypeImplementation
+
+
+type alias Connections =
+    Dict.Any.AnyDict ( String, String ) NibConnection NibConnection
+
+
+type OrderedNibConnection
+    = OrderedNodeConnection { nibIndex : Int, nodeID : ContentID }
+    | OrderedGraphConnection { nibIndex : Int }
+
+
+type alias ContentID =
+    String
+
+
+
+-- graphContentId: Connections -> List NibID -> List NibID -> Map DefinitionID ContentID ->
+-- graphContentId connections outputs inputs dependencies =
+--     List.foldl ()
 
 
 type alias Interface =
@@ -270,26 +335,6 @@ valueDecoder =
             )
 
 
-type NibConnection
-    = NodeConnection { nibID : NibID, nodeID : NodeID }
-    | GraphConnection { nibID : NibID }
-
-
-type Node
-    = CallNode DefinitionID
-    | ValueNode DefinitionID
-
-
-
---- extra
-
-
-type alias Connection =
-    { source : NibConnection
-    , sink : NibConnection
-    }
-
-
 
 --- init
 
@@ -318,6 +363,50 @@ type alias SerializableModel =
 
 exampleID =
     "695eec7b-3084-40e3-994b-59028c466d1e"
+
+
+helloID =
+    "91a72968-c9b4-4ebd-bcec-7c0280989f00"
+
+
+worldID =
+    "e3723bd3-9142-4171-a3cb-4e7a7da57564"
+
+
+concatenateID =
+    "69e342c5-8c55-4ae6-a3b0-1080c4ac8270"
+
+
+concatenateLeftInputID =
+    "8218e386-f0eb-4e16-9230-0e560b44d5f4"
+
+
+concatenateRightInputID =
+    "5ab9e3c2-c7df-4345-9bc2-bd0e03f47a4e"
+
+
+concatenateOutputID =
+    "90a3cbf4-a320-4396-968d-f8847c60a8b8"
+
+
+helloWorldConcatenateNodeID =
+    "4b9a870e-2dae-4504-8920-141b24b01e71"
+
+
+helloWorldID =
+    "41ffb3fd-9a00-4e9f-961d-85430a689160"
+
+
+helloWorldHelloNodeID =
+    "888a06a1-ee06-497d-a393-25800418308c"
+
+
+helloWorldWorldNodeID =
+    "e2fc3dbf-b7bf-4965-95d0-1ab10e408843"
+
+
+helloWorldOutputNibID =
+    "5967b40d-1781-4590-bc12-5295a51c0e6e"
 
 
 init : Json.Encode.Value -> Url -> Nav.Key -> ( Model, Cmd Msg )
@@ -352,12 +441,58 @@ init flagsJson url key =
 
 exampleState : SerializableModel
 exampleState =
-    { names = Dict.fromList [ ( exampleID, makeTranslatable "en" "Example" ) ]
-    , descriptions = Dict.fromList [ ( exampleID, makeTranslatable "en" "Description of example" ) ]
-    , nibs = Dict.fromList []
+    { names =
+        Dict.fromList
+            [ ( exampleID, makeTranslatable "en" "Example" )
+            , ( helloID, makeTranslatable "en" "Hello" )
+            , ( worldID, makeTranslatable "en" "World" )
+            , ( concatenateID, makeTranslatable "en" "Concatenate" )
+            , ( helloWorldID, makeTranslatable "en" "Hello World" )
+            ]
+    , descriptions =
+        Dict.fromList
+            [ ( exampleID, makeTranslatable "en" "Description of example" )
+            , ( helloWorldID, makeTranslatable "en" "Example of concatenating two strings." )
+            ]
+    , nibs =
+        Dict.fromList
+            [ ( helloWorldOutputNibID, makeTranslatable "en" "" )
+            ]
     , implementations =
         Dict.fromList
-            [ ( exampleID, ConstantImplementation (Number 9.8) ) ]
+            [ ( exampleID, ConstantImplementation (Number 9.8) )
+            , ( helloID, ConstantImplementation (Text "hello") )
+            , ( worldID, ConstantImplementation (Text "world") )
+            , ( concatenateID
+              , ExternalImplementation
+                    { inputTypes = Dict.fromList [ ( concatenateLeftInputID, TextType ), ( concatenateRightInputID, TextType ) ]
+                    , outputTypes = Dict.fromList [ ( concatenateOutputID, TextType ) ]
+                    }
+                    "concatenate"
+              )
+            , ( helloWorldID
+              , GraphImplementation
+                    { nodes =
+                        Dict.fromList
+                            [ ( helloWorldConcatenateNodeID, CallNode concatenateID )
+                            , ( helloWorldHelloNodeID, ValueNode helloID )
+                            , ( helloWorldWorldNodeID, ValueNode worldID )
+                            ]
+                    , connections =
+                        Dict.Any.fromList comparableNodeConnection
+                            [ ( { node = Node helloWorldConcatenateNodeID, nib = Nib concatenateLeftInputID }
+                              , { node = Node helloWorldHelloNodeID, nib = Value }
+                              )
+                            , ( { node = Node helloWorldConcatenateNodeID, nib = Nib concatenateRightInputID }
+                              , { node = Node helloWorldWorldNodeID, nib = Value }
+                              )
+                            , ( { node = Graph, nib = Nib helloWorldOutputNibID }
+                              , { node = Node helloWorldConcatenateNodeID, nib = Nib concatenateOutputID }
+                              )
+                            ]
+                    }
+              )
+            ]
     }
 
 
