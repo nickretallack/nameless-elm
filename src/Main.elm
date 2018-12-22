@@ -291,16 +291,16 @@ getFullDependenciesWorker definitionID implementations visited =
             Set.foldl
                 (\childDefinitionID acc ->
                     case acc of
-                        Err error ->
-                            Err error
-
                         Ok set ->
                             case getFullDependenciesWorker childDefinitionID implementations set of
-                                Err error ->
-                                    Err error
-
                                 Ok items ->
                                     Ok (Set.union set items)
+
+                                x ->
+                                    x
+
+                        x ->
+                            x
                 )
                 (Ok allDependencies)
                 newDependencies
