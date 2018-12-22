@@ -306,6 +306,19 @@ getFullDependenciesWorker definitionID implementations visited =
                 newDependencies
 
 
+publish definitionID implementations =
+    Result.andThen
+        (\definitionIDs ->
+            Ok (List.filterMap (\dependencyID -> Dict.get dependencyID implementations) (Set.toList definitionIDs))
+        )
+        (getFullDependencies definitionID implementations)
+
+
+
+-- topoSortDependencies : Set DefinitionID -> List DefinitionID
+-- topoSortDependencies dependencies =
+
+
 type alias Connections =
     Dict.Any.AnyDict ( String, String ) NibConnection NibConnection
 
