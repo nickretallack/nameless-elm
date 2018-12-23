@@ -13,6 +13,7 @@ import Json.Decode
 import Json.Decode.Pipeline exposing (hardcoded, optional, required)
 import Json.Encode
 import Random exposing (Seed)
+import Result exposing (andThen)
 import Set exposing (Set)
 import Sha256 exposing (sha256)
 import Time
@@ -249,6 +250,8 @@ type Implementation
 type alias GraphImplementationRecord =
     { connections : Connections
     , nodes : Dict NodeID Node
+    , inputs : List NibID
+    , outputs : List NibID
     }
 
 
@@ -333,6 +336,16 @@ dictGetResult dict key =
             Ok something
 
 
+anydictGetResult : Dict.Any.AnyDict comparable key value -> key -> Result String value
+anydictGetResult dict key =
+    case Dict.Any.get key dict of
+        Nothing ->
+            Err "KeyError"
+
+        Just something ->
+            Ok something
+
+
 type alias DependencyAdjacencyList =
     Dict DefinitionID (Set DefinitionID)
 
@@ -395,7 +408,13 @@ publishTree definitionID implementations =
             (\ids ->
                 ids
                     |> mapUntilError
-                        (\id -> dictGetResult implementations id |> Result.andThen (\implementation -> Ok { id = id, implementation = implementation }))
+                        (\id ->
+                            dictGetResult implementations id
+                                |> Result.andThen
+                                    (\implementation ->
+                                        Ok { id = id, implementation = implementation }
+                                    )
+                        )
                     |> Result.andThen
                         (\items ->
                             Ok (publishInOrder items)
@@ -411,6 +430,14 @@ type alias ImplementationWithID =
     { id : DefinitionID, implementation : Implementation }
 
 
+
+-- type alias PublishWorkItem =
+--     { contentID : ContentID
+--     , inputOrdering : List NibID
+--     , outputOrdering : List NibID
+--     }
+
+
 publishInOrder : List ImplementationWithID -> List PublishItem
 publishInOrder items =
     (items
@@ -418,7 +445,7 @@ publishInOrder items =
             (\{ id, implementation } { results, mapping } ->
                 let
                     canonical =
-                        makeCanonical implementation mapping
+                        Json.Encode.encode 0 (makeCanonical implementation mapping)
 
                     contentID =
                         sha256 canonical
@@ -431,12 +458,111 @@ publishInOrder items =
     ).results
 
 
-makeCanonical : Implementation -> Dict DefinitionID ContentID -> String
-makeCanonical implementation publishItems =
-    Json.Encode.encode 0 (encodeImplementation implementation)
+makeCanonical : Implementation -> Dict DefinitionID ContentID -> Json.Encode.Value
+makeCanonical implementation workItems =
+    case implementation of
+        -- GraphImplementation value ->
+        --     makeGraphCanonical value workItems
+        _ ->
+            encodeImplementation implementation
 
 
 
+-- makeGraphCanonical : GraphImplementationRecord -> Dict DefinitionID PublishWorkItem -> Json.Encode.Value
+-- makeGraphhCanonical { inputs, outputs, nodes, connections } workItems =
+-- we need to transform both the nodes and connections.
+-- to do that, we need to get sequential node ids
+-- Wait, what if each nodeID was based on what it's connected to?
+-- -- first number the outputs.  Then use those to number the rest.
+-- -- wow, first thing I could do is change all the connections to use nib ordering
+
+
+type alias WorkItem =
+    { contentID : ContentID, inputOrdering : List NibID, outputOrdering : List NibID }
+
+
+type alias WorkItems =
+    Dict DefinitionID WorkItem
+
+
+getNodeOrdering : GraphImplementationRecord -> WorkItems -> Result String (List NodeID)
+getNodeOrdering graph workItems =
+    graph.outputs
+        |> List.foldl
+            (\nibID acc ->
+                acc
+                    |> Result.andThen
+                        (\nodeIDs ->
+                            spiderConnection { node = Graph, nib = Nib nibID } graph workItems
+                                |> andThen
+                                    (\moreNodeIDs ->
+                                        Ok (List.append nodeIDs moreNodeIDs)
+                                    )
+                        )
+            )
+            (Ok [])
+
+
+spiderConnection : NibConnection -> GraphImplementationRecord -> WorkItems -> Result String (List NodeID)
+spiderConnection connection graph workItems =
+    anydictGetResult graph.connections connection
+        |> Result.andThen
+            (\{ nib, node } ->
+                case node of
+                    Node nodeID ->
+                        spiderNodes nodeID nib graph workItems
+                            |> andThen
+                                (\nodeIDs ->
+                                    Ok (nodeID :: nodeIDs)
+                                )
+
+                    Graph ->
+                        Ok []
+            )
+
+
+spiderNodes : NodeID -> ConnectionNib -> GraphImplementationRecord -> WorkItems -> Result String (List NodeID)
+spiderNodes nodeID nib graph workItems =
+    dictGetResult graph.nodes nodeID
+        |> andThen
+            (\node ->
+                case node of
+                    DefinedNode { definitionID } ->
+                        dictGetResult workItems definitionID
+                            |> andThen
+                                (\{ inputOrdering, outputOrdering } ->
+                                    inputOrdering
+                                        |> List.foldl
+                                            (\nibID acc ->
+                                                acc
+                                                    |> andThen
+                                                        (\nodeIDs ->
+                                                            spiderConnection { node = Node nodeID, nib = Nib nibID } graph workItems
+                                                                |> andThen
+                                                                    (\moreNodeIDs ->
+                                                                        Ok (List.append nodeIDs moreNodeIDs)
+                                                                    )
+                                                        )
+                                            )
+                                            (Ok [])
+                                )
+
+                    ReferenceNode ->
+                        Ok []
+            )
+
+
+
+-- -- also needs the ordering of the nibs for each dependency
+--     let
+-- )
+-- let
+--     outputMapping =
+--         outputs |> List.indexedMap (\index nibID -> ( nibID, index )) |> Dict.fromList
+--     startConnection =
+--         connections.get({node= Graph, nib= Nib (Dict.get  ) })
+-- in
+-- Json.Encode.null
 -- case implementation of
 --     GraphImplementation graph ->
 --         { contentID = "Graph!", data = "Graph!" }
@@ -715,6 +841,8 @@ exampleState =
                               , { node = Node helloWorldConcatenateNodeID, nib = Nib concatenateOutputID }
                               )
                             ]
+                    , inputs = []
+                    , outputs = [ helloWorldOutputNibID ]
                     }
               )
             ]
