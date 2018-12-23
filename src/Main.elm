@@ -493,7 +493,7 @@ getNodeOrdering graph workItems =
                 acc
                     |> Result.andThen
                         (\nodeIDs ->
-                            spiderConnection { node = Graph, nib = Nib nibID } graph workItems
+                            spiderConnection { node = Graph, nib = Nib nibID } graph workItems nodeIDs
                                 |> andThen
                                     (\moreNodeIDs ->
                                         Ok (List.append nodeIDs moreNodeIDs)
@@ -503,31 +503,32 @@ getNodeOrdering graph workItems =
             (Ok [])
 
 
-spiderConnection : NibConnection -> GraphImplementationRecord -> WorkItems -> Result String (List NodeID)
-spiderConnection connection graph workItems =
+spiderConnection : NibConnection -> GraphImplementationRecord -> WorkItems -> List NodeID -> Result String (List NodeID)
+spiderConnection connection graph workItems nodeIDs =
     anydictGetResult graph.connections connection
         |> Result.andThen
             (\{ nib, node } ->
                 case node of
                     Node nodeID ->
-                        spiderNodes nodeID nib graph workItems
-                            |> andThen
-                                (\nodeIDs ->
-                                    Ok (nodeID :: nodeIDs)
-                                )
+                        if nodeIDs |> List.member nodeID then
+                            Ok nodeIDs
+
+                        else
+                            spiderNodes nodeID nib graph workItems (nodeIDs |> List.append [ nodeID ])
 
                     Graph ->
                         Ok []
             )
 
 
-spiderNodes : NodeID -> ConnectionNib -> GraphImplementationRecord -> WorkItems -> Result String (List NodeID)
-spiderNodes nodeID nib graph workItems =
+spiderNodes : NodeID -> ConnectionNib -> GraphImplementationRecord -> WorkItems -> List NodeID -> Result String (List NodeID)
+spiderNodes nodeID nib graph workItems nodeIDs =
     dictGetResult graph.nodes nodeID
         |> andThen
             (\node ->
                 case node of
                     DefinedNode { definitionID } ->
+                        -- TODO: also check for "value" connections
                         dictGetResult workItems definitionID
                             |> andThen
                                 (\{ inputOrdering, outputOrdering } ->
@@ -536,19 +537,15 @@ spiderNodes nodeID nib graph workItems =
                                             (\nibID acc ->
                                                 acc
                                                     |> andThen
-                                                        (\nodeIDs ->
-                                                            spiderConnection { node = Node nodeID, nib = Nib nibID } graph workItems
-                                                                |> andThen
-                                                                    (\moreNodeIDs ->
-                                                                        Ok (List.append nodeIDs moreNodeIDs)
-                                                                    )
+                                                        (\nodeIDsAcc ->
+                                                            spiderConnection { node = Node nodeID, nib = Nib nibID } graph workItems nodeIDs
                                                         )
                                             )
-                                            (Ok [])
+                                            (Ok nodeIDs)
                                 )
 
                     ReferenceNode ->
-                        Ok []
+                        Ok nodeIDs
             )
 
 
