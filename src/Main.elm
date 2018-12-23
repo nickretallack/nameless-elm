@@ -383,30 +383,51 @@ getPublishOrder definitionID implementations =
     makeDependencyAdjacencyList definitionID implementations |> Result.andThen topoSortDependencies
 
 
--- publishTree definitionID implementations =
+publishTree : DefinitionID -> Implementations -> Result String (List PublishItem)
+publishTree definitionID implementations =
+    getPublishOrder definitionID implementations
+        |> Result.andThen
+            (\ids ->
+                ids
+                    |> mapUntilError
+                        (\id -> dictGetResult implementations id |> Result.andThen (\implementation -> Ok { id = id, implementation = implementation }))
+                    |> Result.andThen
+                        (\items ->
+                            Ok
+                                (items
+                                    |> List.foldl
+                                        (\{ id, implementation } { results, mapping } ->
+                                            let
+                                                published =
+                                                    publishSingle implementation mapping
+                                            in
+                                            { results = results |> List.append [ published ]
+                                            , mapping = mapping |> Dict.insert id published.contentID
+                                            }
+                                        )
+                                        { results = [], mapping = Dict.empty }
+                                ).results
+                        )
+            )
 
 
-
---     getPublishOrder definitionID implementations
---         |> Result.andThen
---             (\ids ->
---                 ids |> mapUntilError (\id -> {id=id, implementation=dictGetResult implementations}) |> Result.andThen (\items ->
---                     |> List.foldl
---                         (\{id, implementation} result ->
---                             Dict.insert id (publishSingle implementation result )
---                         )
-                
---                 )
+type alias FullPublishItem =
+    { definitionID : DefinitionID }
 
 
---             )
+type alias PublishItem =
+    { contentID : ContentID, data : String }
 
 
-publishSingle : Implementation -> Dict DefinitionID ContentID -> {contentID: ContentID, data: String}
-publishSingle implementation contentIDs =
+publishSingle : Implementation -> Dict DefinitionID ContentID -> PublishItem
+publishSingle implementation publishItems =
     case implementation of
-        GraphImplementation graph -> {contentID = "Graph!", data = "Graph!"}
-        _ -> {contentID = "Other!", data = "Other!"}
+        GraphImplementation graph ->
+            { contentID = "Graph!", data = "Graph!" }
+
+        _ ->
+            { contentID = "Other!", data = "Other!" }
+
 
 type alias Connections =
     Dict.Any.AnyDict ( String, String ) NibConnection NibConnection
