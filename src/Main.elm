@@ -378,6 +378,36 @@ topoSortDependencies dependencies =
                 |> Result.andThen (\rest -> Ok (List.append (Set.toList availableSet) rest))
 
 
+getPublishOrder : DefinitionID -> Implementations -> Result String (List DefinitionID)
+getPublishOrder definitionID implementations =
+    makeDependencyAdjacencyList definitionID implementations |> Result.andThen topoSortDependencies
+
+
+-- publishTree definitionID implementations =
+
+
+
+--     getPublishOrder definitionID implementations
+--         |> Result.andThen
+--             (\ids ->
+--                 ids |> mapUntilError (\id -> {id=id, implementation=dictGetResult implementations}) |> Result.andThen (\items ->
+--                     |> List.foldl
+--                         (\{id, implementation} result ->
+--                             Dict.insert id (publishSingle implementation result )
+--                         )
+                
+--                 )
+
+
+--             )
+
+
+publishSingle : Implementation -> Dict DefinitionID ContentID -> {contentID: ContentID, data: String}
+publishSingle implementation contentIDs =
+    case implementation of
+        GraphImplementation graph -> {contentID = "Graph!", data = "Graph!"}
+        _ -> {contentID = "Other!", data = "Other!"}
+
 type alias Connections =
     Dict.Any.AnyDict ( String, String ) NibConnection NibConnection
 
