@@ -14,6 +14,7 @@ import Json.Decode.Pipeline exposing (hardcoded, optional, required)
 import Json.Encode
 import Random exposing (Seed)
 import Set exposing (Set)
+import Sha256 exposing (sha256)
 import Time
 import UUID exposing (UUID)
 import Url exposing (Url)
@@ -383,6 +384,10 @@ getPublishOrder definitionID implementations =
     makeDependencyAdjacencyList definitionID implementations |> Result.andThen topoSortDependencies
 
 
+
+-- TODO: handle recursion and mutual recursion
+
+
 publishTree : DefinitionID -> Implementations -> Result String (List PublishItem)
 publishTree definitionID implementations =
     getPublishOrder definitionID implementations
@@ -393,40 +398,52 @@ publishTree definitionID implementations =
                         (\id -> dictGetResult implementations id |> Result.andThen (\implementation -> Ok { id = id, implementation = implementation }))
                     |> Result.andThen
                         (\items ->
-                            Ok
-                                (items
-                                    |> List.foldl
-                                        (\{ id, implementation } { results, mapping } ->
-                                            let
-                                                published =
-                                                    publishSingle implementation mapping
-                                            in
-                                            { results = results |> List.append [ published ]
-                                            , mapping = mapping |> Dict.insert id published.contentID
-                                            }
-                                        )
-                                        { results = [], mapping = Dict.empty }
-                                ).results
+                            Ok (publishInOrder items)
                         )
             )
 
 
-type alias FullPublishItem =
-    { definitionID : DefinitionID }
-
-
 type alias PublishItem =
-    { contentID : ContentID, data : String }
+    { definitionID : DefinitionID, contentID : ContentID, canonical : String }
 
 
-publishSingle : Implementation -> Dict DefinitionID ContentID -> PublishItem
-publishSingle implementation publishItems =
-    case implementation of
-        GraphImplementation graph ->
-            { contentID = "Graph!", data = "Graph!" }
+type alias ImplementationWithID =
+    { id : DefinitionID, implementation : Implementation }
 
-        _ ->
-            { contentID = "Other!", data = "Other!" }
+
+publishInOrder : List ImplementationWithID -> List PublishItem
+publishInOrder items =
+    (items
+        |> List.foldl
+            (\{ id, implementation } { results, mapping } ->
+                let
+                    canonical =
+                        makeCanonical implementation mapping
+
+                    contentID =
+                        sha256 canonical
+                in
+                { results = results |> List.append [ { definitionID = id, contentID = contentID, canonical = canonical } ]
+                , mapping = mapping |> Dict.insert id contentID
+                }
+            )
+            { results = [], mapping = Dict.empty }
+    ).results
+
+
+makeCanonical : Implementation -> Dict DefinitionID ContentID -> String
+makeCanonical implementation publishItems =
+    Json.Encode.encode 0 (encodeImplementation implementation)
+
+
+
+-- case implementation of
+--     GraphImplementation graph ->
+--         { contentID = "Graph!", data = "Graph!" }
+--     ConstantImplementation value ->
+--     _ ->
+--         { contentID = "Other!", data = "Other!" }
+-- publishConstant implementation =
 
 
 type alias Connections =
