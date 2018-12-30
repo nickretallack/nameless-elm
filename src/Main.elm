@@ -250,8 +250,8 @@ type Implementation
 type alias GraphImplementationRecord =
     { connections : Connections
     , nodes : Dict NodeID Node
-    , inputs : List NibID
-    , outputs : List NibID
+    , inputs : Set NibID
+    , outputs : Set NibID
     }
 
 
@@ -515,9 +515,116 @@ type CanonicalConnectionNib
     | CanonicalConnectionNib Int
 
 
+type OutputOrderingTree
+    = Disconnected
+    | Input
+    | Reference
+    | OutputOrderingNode OutputOrderingNodeRecord
+
+
+type alias OutputOrderingNodeRecord =
+    { contentID : ContentID
+    , kind : DefinedNodeType
+    , children : List OutputOrderingTree
+    }
+
+
+
+-- encodeOutputOrderingTree : OutputOrderingTree -> Json.Encode.Value
+-- encodeOutputOrderingTree tree =
+-- getOutputOrdering : GraphImplementationRecord -> WorkItems -> Result String (List NibID)
+-- getOutputOrdering graph workItems =
+--     if Set.size graph.outputs <= 1 then
+--         Ok (Set.toList graph.outputs)
+--     else
+--         graph.outputs |> Set.toList |> resultMap (canonicalizeOutput graph workItems) |> andThen (\items ->
+--             items |> List.sortBy (\(nibID, tree) -> hashOutputTree tree) |> List.map (\(nibID, tree) -> nibID)
+--         )
+-- hashOutputTree tree =
+--     sha256 (Json.Encode.encode 0 (encodeOutputOrderingTree tree))
+
+
+canonicalizeOutput : GraphImplementationRecord -> WorkItems -> NibID -> Result String ( NibID, OutputOrderingTree )
+canonicalizeOutput graph workItems nibID =
+    canonicalizeOutputConnection graph workItems { node = Graph, nib = Nib nibID }
+        |> andThen
+            (\tree ->
+                Ok ( nibID, tree )
+            )
+
+
+canonicalizeOutputConnection : GraphImplementationRecord -> WorkItems -> NibConnection -> Result String OutputOrderingTree
+canonicalizeOutputConnection graph workItems connection =
+    case graph.connections |> Dict.Any.get connection of
+        Nothing ->
+            Ok Disconnected
+
+        Just { nib, node } ->
+            case node of
+                Graph ->
+                    Ok Input
+
+                Node nodeID ->
+                    dictGetResult graph.nodes nodeID
+                        |> andThen
+                            (\graphNode ->
+                                case graphNode of
+                                    ReferenceNode ->
+                                        Ok Reference
+
+                                    DefinedNode { kind, definitionID } ->
+                                        -- TODO: also follow Value input if it exists for this definition type
+                                        dictGetResult workItems definitionID
+                                            |> andThen
+                                                (\workItem ->
+                                                    (workItem.inputOrdering
+                                                        |> resultMap
+                                                            (\nibID ->
+                                                                canonicalizeOutputConnection graph workItems { node = Node nodeID, nib = Nib nibID }
+                                                            )
+                                                    )
+                                                        |> andThen
+                                                            (\children ->
+                                                                Ok
+                                                                    (OutputOrderingNode
+                                                                        { kind = kind
+                                                                        , contentID = workItem.contentID
+                                                                        , children = children
+                                                                        }
+                                                                    )
+                                                            )
+                                                )
+                            )
+
+
+resultMap : (a -> Result err b) -> List a -> Result err (List b)
+resultMap fun list =
+    list
+        |> List.foldl
+            (\item acc ->
+                acc
+                    |> andThen
+                        (\mappedList ->
+                            fun item
+                                |> (\errMappedItem ->
+                                        errMappedItem
+                                            |> andThen
+                                                (\mappedItem ->
+                                                    Ok (List.append mappedList [ mappedItem ])
+                                                )
+                                   )
+                        )
+            )
+            (Ok [])
+
+
+
+-- make an intermediate canonical representation of each one, using its content IDs
+
+
 canonicalizeGraphImplementation : GraphImplementationRecord -> WorkItems -> List NibID -> List NibID -> Result String CanonicalGraphImplementation
 canonicalizeGraphImplementation implementation workItems inputOrdering outputOrdering =
-    getNodeOrdering implementation workItems
+    getNodeOrdering implementation workItems outputOrdering
         |> andThen
             (\nodeOrdering ->
                 let
@@ -641,9 +748,9 @@ canonicalizeConnectionNib original nodeOrdering workItems graphNibOrdering isInp
                     )
 
 
-getNodeOrdering : GraphImplementationRecord -> WorkItems -> Result String (List NodeID)
-getNodeOrdering graph workItems =
-    graph.outputs
+getNodeOrdering : GraphImplementationRecord -> WorkItems -> List NibID -> Result String (List NodeID)
+getNodeOrdering graph workItems outputOrdering =
+    outputOrdering
         |> List.foldl
             (\nibID acc ->
                 acc
@@ -661,20 +768,21 @@ getNodeOrdering graph workItems =
 
 spiderConnection : NibConnection -> GraphImplementationRecord -> WorkItems -> List NodeID -> Result String (List NodeID)
 spiderConnection connection graph workItems nodeIDs =
-    anydictGetResult graph.connections connection
-        |> Result.andThen
-            (\{ nib, node } ->
-                case node of
-                    Node nodeID ->
-                        if nodeIDs |> List.member nodeID then
-                            Ok nodeIDs
+    case graph.connections |> Dict.Any.get connection of
+        Nothing ->
+            Ok []
 
-                        else
-                            spiderNodes nodeID nib graph workItems (nodeIDs |> List.append [ nodeID ])
+        Just { nib, node } ->
+            case node of
+                Node nodeID ->
+                    if nodeIDs |> List.member nodeID then
+                        Ok nodeIDs
 
-                    Graph ->
-                        Ok []
-            )
+                    else
+                        spiderNodes nodeID nib graph workItems (nodeIDs |> List.append [ nodeID ])
+
+                Graph ->
+                    Ok []
 
 
 spiderNodes : NodeID -> ConnectionNib -> GraphImplementationRecord -> WorkItems -> List NodeID -> Result String (List NodeID)
@@ -1023,8 +1131,8 @@ exampleState =
                               , { node = Node helloWorldConcatenateNodeID, nib = Nib concatenateOutputID }
                               )
                             ]
-                    , inputs = []
-                    , outputs = [ helloWorldOutputNibID ]
+                    , inputs = Set.fromList []
+                    , outputs = Set.fromList [ helloWorldOutputNibID ]
                     }
               )
             ]
