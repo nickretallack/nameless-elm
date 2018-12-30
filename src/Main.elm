@@ -485,6 +485,162 @@ type alias WorkItems =
     Dict DefinitionID WorkItem
 
 
+type alias CanonicalGraphImplementation =
+    { connections : List CanonicalConnection
+    , nodes : List Node
+    , inputCount : Int
+    , outputCount : Int
+    }
+
+
+type alias CanonicalConnection =
+    { source : CanonicalNibConnection
+    , sink : CanonicalNibConnection
+    }
+
+
+type alias CanonicalNibConnection =
+    { node : CanonicalConnectionNode
+    , nib : CanonicalConnectionNib
+    }
+
+
+type CanonicalConnectionNode
+    = CanonicalConnectionGraph
+    | CanonicalConnectionNode Int
+
+
+type CanonicalConnectionNib
+    = CanonicalConnectionValueNib
+    | CanonicalConnectionNib Int
+
+
+canonicalizeGraphImplementation : GraphImplementationRecord -> WorkItems -> List NibID -> List NibID -> Result String CanonicalGraphImplementation
+canonicalizeGraphImplementation implementation workItems inputOrdering outputOrdering =
+    getNodeOrdering implementation workItems
+        |> andThen
+            (\nodeOrdering ->
+                let
+                    maybeNodes =
+                        nodeOrdering
+                            |> List.foldl
+                                (\nodeID acc ->
+                                    acc
+                                        |> andThen
+                                            (\list ->
+                                                dictGetResult implementation.nodes nodeID
+                                                    |> andThen
+                                                        (\node ->
+                                                            case node of
+                                                                ReferenceNode ->
+                                                                    Ok (List.append list [ ReferenceNode ])
+
+                                                                DefinedNode { kind, definitionID } ->
+                                                                    dictGetResult workItems definitionID
+                                                                        |> andThen
+                                                                            (\workItem ->
+                                                                                Ok (List.append list [ DefinedNode { kind = kind, definitionID = workItem.contentID } ])
+                                                                            )
+                                                        )
+                                            )
+                                )
+                                (Ok
+                                    []
+                                )
+
+                    maybeConnections =
+                        Dict.Any.toList implementation.connections
+                            |> List.foldl
+                                (\( sink, source ) acc ->
+                                    acc
+                                        |> andThen
+                                            (\list ->
+                                                canonicalizeConnectionNib sink nodeOrdering workItems inputOrdering False
+                                                    |> andThen
+                                                        (\canonicalSink ->
+                                                            canonicalizeConnectionNib source nodeOrdering workItems outputOrdering True
+                                                                |> andThen
+                                                                    (\canonicalSource ->
+                                                                        Ok
+                                                                            (List.append list
+                                                                                [ { sink = canonicalSink
+                                                                                  , source = canonicalSource
+                                                                                  }
+                                                                                ]
+                                                                            )
+                                                                    )
+                                                        )
+                                            )
+                                )
+                                (Ok [])
+                in
+                maybeNodes
+                    |> andThen
+                        (\nodes ->
+                            maybeConnections
+                                |> andThen
+                                    (\connections ->
+                                        Ok
+                                            { connections = connections
+                                            , nodes = nodes
+                                            , inputCount = List.length inputOrdering
+                                            , outputCount = List.length outputOrdering
+                                            }
+                                    )
+                        )
+            )
+
+
+canonicalizeConnectionNib : NibConnection -> List NodeID -> WorkItems -> List NibID -> Bool -> Result String CanonicalNibConnection
+canonicalizeConnectionNib original nodeOrdering workItems graphNibOrdering isInput =
+    case original.node of
+        Graph ->
+            case original.nib of
+                ValueNib ->
+                    Ok { node = CanonicalConnectionGraph, nib = CanonicalConnectionValueNib }
+
+                Nib nibID ->
+                    findIndexError graphNibOrdering nibID
+                        |> andThen
+                            (\nibIndex ->
+                                Ok { node = CanonicalConnectionGraph, nib = CanonicalConnectionNib nibIndex }
+                            )
+
+        -- get nib ordering in this graph's inputs
+        Node nodeID ->
+            findIndexError nodeOrdering nodeID
+                |> andThen
+                    (\nodeIndex ->
+                        case original.nib of
+                            ValueNib ->
+                                Ok
+                                    { node = CanonicalConnectionNode nodeIndex
+                                    , nib = CanonicalConnectionValueNib
+                                    }
+
+                            Nib nibID ->
+                                dictGetResult workItems nodeID
+                                    |> andThen
+                                        (\workItem ->
+                                            findIndexError
+                                                (if isInput then
+                                                    workItem.inputOrdering
+
+                                                 else
+                                                    workItem.outputOrdering
+                                                )
+                                                nibID
+                                                |> andThen
+                                                    (\nibIndex ->
+                                                        Ok
+                                                            { node = CanonicalConnectionNode nodeIndex
+                                                            , nib = CanonicalConnectionNib nibIndex
+                                                            }
+                                                    )
+                                        )
+                    )
+
+
 getNodeOrdering : GraphImplementationRecord -> WorkItems -> Result String (List NodeID)
 getNodeOrdering graph workItems =
     graph.outputs
@@ -569,13 +725,42 @@ spiderNodes nodeID nib graph workItems nodeIDs =
 -- publishConstant implementation =
 
 
+findIndexError list needle =
+    case findIndex list needle of
+        Nothing ->
+            Err "Not found"
+
+        Just x ->
+            Ok x
+
+
+findIndex : List a -> a -> Maybe Int
+findIndex list needle =
+    case list of
+        [] ->
+            Nothing
+
+        head :: tail ->
+            if head == needle then
+                Just 0
+
+            else
+                case findIndex tail needle of
+                    Nothing ->
+                        Nothing
+
+                    Just x ->
+                        Just (x + 1)
+
+
 type alias Connections =
     Dict.Any.AnyDict ( String, String ) NibConnection NibConnection
 
 
-type OrderedNibConnection
-    = OrderedNodeConnection { nibIndex : Int, nodeID : ContentID }
-    | OrderedGraphConnection { nibIndex : Int }
+
+-- type OrderedNibConnection
+--     = OrderedNodeConnection { nibIndex : Int, nodeID : ContentID }
+--     | OrderedGraphConnection { nibIndex : Int }
 
 
 type alias ContentID =
